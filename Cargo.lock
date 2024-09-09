@@ -916,7 +916,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "htmx-axum-russh-games"
+name = "htmx-ssh-games"
 version = "0.1.0"
 dependencies = [
  "anyhow",

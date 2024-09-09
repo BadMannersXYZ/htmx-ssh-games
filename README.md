@@ -1,6 +1,6 @@
-# htmx-axum-russh-games
+# htmx-ssh-games
 
-A few silly games I made while I learn about Axum and HTMX.
+A few silly games I made while I learn about Axum, SSH (with Russh), and HTMX.
 
 ## checkbox.rs
 

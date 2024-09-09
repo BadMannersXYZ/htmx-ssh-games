@@ -1,7 +1,7 @@
 [package]
 authors = ["Bad Manners <me@badmanners.xyz>"]
-description = "A few silly games I made while I learn about Axum and HTMX."
-name = "htmx-axum-russh-games"
+description = "A few silly games I made while I learn about Axum, SSH (with Russh), and HTMX."
+name = "htmx-ssh-games"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
