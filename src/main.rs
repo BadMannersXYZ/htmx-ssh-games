@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use tank_drone_test::{
+use htmx_axum_russh_games::{
     entrypoint::{local_server_entrypoint, ssh_entrypoint},
     http::{checkbox, multipaint_by_numbers, ROUTER},
 };

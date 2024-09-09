@@ -916,6 +916,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "htmx-axum-russh-games"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "axum-macros",
+ "bitvec",
+ "clap",
+ "futures",
+ "hyper",
+ "hyper-util",
+ "maud",
+ "reqwest",
+ "russh",
+ "termsize",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tower 0.5.0",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "http"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2344,31 +2369,6 @@ checksum = "8e1d1b10ced5ca923a1fcb8d03e96b8d3268065d724548c0211415ff6ac6bac4"
 dependencies = [
  "core-foundation-sys",
  "libc",
-]
-
-[[package]]
-name = "tank-drone-test"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum",
- "axum-macros",
- "bitvec",
- "clap",
- "futures",
- "hyper",
- "hyper-util",
- "maud",
- "reqwest",
- "russh",
- "termsize",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tower 0.5.0",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
