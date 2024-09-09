@@ -6,4 +6,4 @@ RUN cargo build --release
 
 FROM alpine:3.20
 COPY --from=builder /usr/src/app/target/release/htmx-ssh-games /usr/local/bin/htmx-ssh-games
-ENTRYPOINT [ "app" ]
+ENTRYPOINT [ "htmx-ssh-games" ]
