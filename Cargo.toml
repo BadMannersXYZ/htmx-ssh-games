@@ -1,0 +1,25 @@
+[package]
+name = "tank-drone-test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.86"
+async-trait = "0.1"
+axum = "0.7.5"
+axum-macros = "0.4.1"
+bitvec = "1.0.1"
+clap = { version = "4.5.17", features = ["derive"] }
+futures = "0.3.30"
+hyper = { version = "1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+maud = { version = "0.26.0", features = ["axum"] }
+reqwest = "0.12.7"
+russh = "0.45"
+termsize = "0.1.9"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1.15", features = ["net", "sync"] }
+tokio-util = "0.7.11"
+tower = "0.5.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3.18", features = ["fmt", "env-filter", "std"] }
