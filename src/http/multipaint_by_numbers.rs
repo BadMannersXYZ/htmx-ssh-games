@@ -1,7 +1,5 @@
 use std::{
-    borrow::BorrowMut,
     mem,
-    ops::{BitXor, DerefMut},
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -12,7 +10,7 @@ use axum::{
     routing::{delete, get, put},
     Router,
 };
-use bitvec::{bitvec, order::Lsb0, vec::BitVec};
+use bitvec::{bitvec, order::Lsb0, slice::BitSlice, vec::BitVec};
 use hyper::StatusCode;
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 use reqwest::redirect::Policy;
@@ -159,7 +157,7 @@ async fn get_puzzle() -> Result<Puzzle> {
             }
         }
     }
-    if rows.len() == 0 || columns.len() == 0 || solution.len() == 0 {
+    if rows.is_empty() || columns.is_empty() || solution.is_empty() {
         warn!(id = id, "Invalid puzzle.");
         Err(anyhow!("Invalid puzzle"))
     } else {
@@ -180,8 +178,8 @@ async fn get_puzzle() -> Result<Puzzle> {
 pub async fn get_router() -> Router {
     let first_puzzle = loop {
         let puzzle = get_puzzle().await;
-        if puzzle.is_ok() {
-            break puzzle.unwrap();
+        if let Ok(puzzle) = puzzle {
+            break puzzle;
         }
     };
     info!("test");
@@ -284,13 +282,13 @@ async fn index() -> Markup {
     }
 }
 
-async fn nonogram_oob(state: State<AppState>) -> Markup {
-    html! {
-        div #nonogram hx-get="/nonogram" hx-trigger="load, every 3s" {
-            (nonogram(state).await)
-        }
-    }
-}
+// async fn nonogram_oob(state: State<AppState>) -> Markup {
+//     html! {
+//         div #nonogram hx-get="/nonogram" hx-trigger="load, every 3s" {
+//             (nonogram(state).await)
+//         }
+//     }
+// }
 
 async fn nonogram(State(state): State<AppState>) -> Markup {
     let puzzle = state.current_puzzle.lock().unwrap();
@@ -459,19 +457,15 @@ async fn unmark_checkbox(
 }
 
 fn check_if_solved(
-    solution: &BitVec<usize, Lsb0>,
-    checkboxes: &Vec<CheckboxState>,
+    solution: &BitSlice<usize, Lsb0>,
+    checkboxes: &[CheckboxState],
     state: &AppState,
 ) -> bool {
     let wrong_squares = solution
-        .clone()
-        .bitxor(
-            checkboxes
-                .iter()
-                .map(|&state| state == CheckboxState::Marked)
-                .collect::<BitVec<usize, Lsb0>>(),
-        )
-        .count_ones();
+        .iter()
+        .zip(checkboxes.iter())
+        .filter(|(solution, &state)| solution.ne(&(state == CheckboxState::Marked)))
+        .count();
     let is_solved = wrong_squares == 0;
     if is_solved {
         let state = state.clone();
@@ -482,8 +476,8 @@ fn check_if_solved(
             // Fetch next puzzle
             let next_puzzle = loop {
                 let puzzle = get_puzzle().await;
-                if puzzle.is_ok() {
-                    break puzzle.unwrap();
+                if let Ok(puzzle) = puzzle {
+                    break puzzle;
                 }
             };
             let _ = mem::replace(
