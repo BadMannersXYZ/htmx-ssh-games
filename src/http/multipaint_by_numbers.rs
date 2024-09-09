@@ -276,19 +276,11 @@ async fn index() -> Markup {
                 "."
             }
             p { "Click to mark/unmark." }
-            p { "Ctrl+Click to flag. (Then wait for a bit...!)" }
+            p { "Ctrl+Click to flag." }
             p style=(PreEscaped("opacity: 0")) { "Howdy from Bad Manners!" }
         }
     }
 }
-
-// async fn nonogram_oob(state: State<AppState>) -> Markup {
-//     html! {
-//         div #nonogram hx-get="/nonogram" hx-trigger="load, every 3s" {
-//             (nonogram(state).await)
-//         }
-//     }
-// }
 
 async fn nonogram(State(state): State<AppState>) -> Markup {
     let puzzle = state.current_puzzle.lock().unwrap();
@@ -343,7 +335,7 @@ async fn nonogram(State(state): State<AppState>) -> Markup {
                         @let slice = &checkboxes[id_range.clone()];
                         @for (id, &state) in id_range.zip(slice) {
                             td {
-                                (checkbox(id, is_solved, state))
+                                (checkbox(id, is_solved, &state))
                             }
                         }
                     }
@@ -353,7 +345,7 @@ async fn nonogram(State(state): State<AppState>) -> Markup {
     }
 }
 
-fn checkbox(id: usize, is_solved: bool, state: CheckboxState) -> Markup {
+fn checkbox(id: usize, is_solved: bool, state: &CheckboxState) -> Markup {
     match state {
         CheckboxState::Marked => html! {
             .checkbox.marked {
@@ -364,14 +356,14 @@ fn checkbox(id: usize, is_solved: bool, state: CheckboxState) -> Markup {
         CheckboxState::Flagged if !is_solved => html! {
             .checkbox.flagged {
                 input id=(format!("checkbox-{id}")) type="checkbox" disabled[is_solved] {}
-                div hx-put=(format!("/checkbox/{}", id)) hx-trigger=(format!("click from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
+                div hx-put=(format!("/checkbox/{}", id)) hx-trigger=(format!("click[!ctrlKey] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
                 div hx-delete=(format!("/flag/{}", id)) hx-trigger=(format!("click[ctrlKey] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
             }
         },
         _ => html! {
             .checkbox.empty {
                 input id=(format!("checkbox-{id}")) type="checkbox" disabled[is_solved] {}
-                div hx-put=(format!("/checkbox/{}", id)) hx-trigger=(format!("click from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
+                div hx-put=(format!("/checkbox/{}", id)) hx-trigger=(format!("click[!ctrlKey] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
                 div hx-put=(format!("/flag/{}", id)) hx-trigger=(format!("click[ctrlKey] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
             }
         },
@@ -382,18 +374,16 @@ async fn flag_checkbox(
     State(state): State<AppState>,
     Path(id): Path<usize>,
 ) -> Result<Markup, StatusCode> {
-    let puzzle = state.current_puzzle.lock().unwrap();
-    if puzzle.is_solved {
-        Ok(checkbox(id, true, CheckboxState::Empty))
+    let mut checkboxes = state.checkboxes.lock().unwrap();
+    if checkboxes.get(id).is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let is_solved = state.current_puzzle.lock().unwrap().is_solved;
+    if is_solved {
+        Ok(checkbox(id, is_solved, &checkboxes[id]))
     } else {
-        let mut checkboxes = state.checkboxes.lock().unwrap();
-        match checkboxes.get_mut(id) {
-            None => Err(StatusCode::NOT_FOUND),
-            Some(checkbox_state) => {
-                *checkbox_state = CheckboxState::Flagged;
-                Ok(checkbox(id, false, CheckboxState::Flagged))
-            }
-        }
+        let _ = std::mem::replace(&mut checkboxes[id], CheckboxState::Flagged);
+        Ok(checkbox(id, is_solved, &checkboxes[id]))
     }
 }
 
@@ -401,18 +391,16 @@ async fn unflag_checkbox(
     State(state): State<AppState>,
     Path(id): Path<usize>,
 ) -> Result<Markup, StatusCode> {
-    let puzzle = state.current_puzzle.lock().unwrap();
-    if puzzle.is_solved {
-        Ok(checkbox(id, true, CheckboxState::Empty))
+    let mut checkboxes = state.checkboxes.lock().unwrap();
+    if checkboxes.get(id).is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let is_solved = state.current_puzzle.lock().unwrap().is_solved;
+    if is_solved {
+        Ok(checkbox(id, is_solved, &checkboxes[id]))
     } else {
-        let mut checkboxes = state.checkboxes.lock().unwrap();
-        match checkboxes.get_mut(id) {
-            None => Err(StatusCode::NOT_FOUND),
-            Some(checkbox_state) => {
-                *checkbox_state = CheckboxState::Flagged;
-                Ok(checkbox(id, false, CheckboxState::Flagged))
-            }
-        }
+        let _ = std::mem::replace(&mut checkboxes[id], CheckboxState::Empty);
+        Ok(checkbox(id, is_solved, &checkboxes[id]))
     }
 }
 
@@ -420,19 +408,19 @@ async fn mark_checkbox(
     State(state): State<AppState>,
     Path(id): Path<usize>,
 ) -> Result<Markup, StatusCode> {
+    let mut checkboxes = state.checkboxes.lock().unwrap();
+    if checkboxes.get(id).is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
     let mut puzzle = state.current_puzzle.lock().unwrap();
-    if puzzle.is_solved {
-        Ok(checkbox(id, true, CheckboxState::Empty))
+    let mut is_solved = puzzle.is_solved;
+    if is_solved {
+        Ok(checkbox(id, is_solved, &checkboxes[id]))
     } else {
-        let mut checkboxes = state.checkboxes.lock().unwrap();
-        match checkboxes.get_mut(id) {
-            None => return Err(StatusCode::NOT_FOUND),
-            Some(checkbox_state) => {
-                *checkbox_state = CheckboxState::Marked;
-            }
-        }
-        puzzle.is_solved = check_if_solved(&puzzle.solution, &checkboxes, &state);
-        Ok(checkbox(id, puzzle.is_solved, CheckboxState::Marked))
+        let _ = std::mem::replace(&mut checkboxes[id], CheckboxState::Marked);
+        is_solved = check_if_solved(&puzzle.solution, &checkboxes, &state);
+        puzzle.is_solved = is_solved;
+        Ok(checkbox(id, is_solved, &checkboxes[id]))
     }
 }
 
@@ -441,18 +429,18 @@ async fn unmark_checkbox(
     Path(id): Path<usize>,
 ) -> Result<Markup, StatusCode> {
     let mut puzzle = state.current_puzzle.lock().unwrap();
-    if puzzle.is_solved {
-        Ok(checkbox(id, true, CheckboxState::Marked))
+    let mut checkboxes = state.checkboxes.lock().unwrap();
+    let mut is_solved = puzzle.is_solved;
+    if checkboxes.get(id).is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    if is_solved {
+        Ok(checkbox(id, is_solved, &checkboxes[id]))
     } else {
-        let mut checkboxes = state.checkboxes.lock().unwrap();
-        match checkboxes.get_mut(id) {
-            None => return Err(StatusCode::NOT_FOUND),
-            Some(checkbox_state) => {
-                *checkbox_state = CheckboxState::Empty;
-            }
-        }
-        puzzle.is_solved = check_if_solved(&puzzle.solution, &checkboxes, &state);
-        Ok(checkbox(id, puzzle.is_solved, CheckboxState::Empty))
+        let _ = std::mem::replace(&mut checkboxes[id], CheckboxState::Empty);
+        is_solved = check_if_solved(&puzzle.solution, &checkboxes, &state);
+        puzzle.is_solved = is_solved;
+        Ok(checkbox(id, is_solved, &checkboxes[id]))
     }
 }
 
