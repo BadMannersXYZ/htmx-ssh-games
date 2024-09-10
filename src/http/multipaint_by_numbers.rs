@@ -23,7 +23,7 @@ use tokio::{
 };
 use tracing::{debug, info, warn};
 
-use crate::webpbpn::{get_puzzle_data, get_random_puzzle_id, WebpbnPuzzle};
+use crate::webpbpn::{get_puzzle_data, get_random_puzzle_id, WebpbnPuzzle, WEBPBN_PUZZLE_LIST};
 
 /* Type defintions */
 
@@ -48,6 +48,7 @@ enum CheckboxState {
 }
 
 struct Nonogram {
+    puzzle_count: u32,
     state: NonogramState,
     puzzle: WebpbnPuzzle,
     checkboxes: Vec<CheckboxState>,
@@ -101,8 +102,10 @@ struct AppState {
 
 /// A lazily-created Router, to be used by the SSH client tunnels.
 pub async fn get_router() -> Router {
+    let mut puzzle_count = 0;
     let first_puzzle = loop {
-        let puzzle = get_puzzle().await;
+        let puzzle = get_puzzle(puzzle_count).await;
+        puzzle_count += 1;
         if let Ok(puzzle) = puzzle {
             break puzzle;
         }
@@ -110,6 +113,7 @@ pub async fn get_router() -> Router {
     let duration = get_duration_for_puzzle(first_puzzle.rows.len(), first_puzzle.columns.len());
     let state = AppState {
         nonogram: Arc::new(Mutex::new(Nonogram {
+            puzzle_count,
             checkboxes: vec![
                 CheckboxState::Empty;
                 first_puzzle.rows.len() * first_puzzle.columns.len()
@@ -169,10 +173,12 @@ table {
     overflow: hidden;
 }
 tr:nth-child(5n - 3) {
-    border-top: 1pt solid black;
+    border-top: 1pt solid;
+    border-top-color: #000;
 }
 tr th:nth-child(5n - 3), tr td:nth-child(5n - 3) {
-    border-left: 1pt solid black;
+    border-left: 1pt solid
+    border-left-color: #000;
 }
 th[scope="col"] {
     vertical-align: bottom;
@@ -244,8 +250,8 @@ svg.cursor:hover {
 }
 @media(prefers-color-scheme: dark) {
     body {
-        color: #fff;
-        background-color: #010103;
+        color: #ccc;
+        background-color: #333;
     }
     h2#congratulations {
         color: #7d7;
@@ -255,6 +261,12 @@ svg.cursor:hover {
     }
     tr:hover, td:hover::after, th:hover::after {
         background-color: #663;
+    }
+    tr:nth-child(5n - 3) {
+        border-top-color: #fff;
+    }
+    tr th:nth-child(5n - 3), tr td:nth-child(5n - 3) {
+        border-left-color: #fff;
     }
 }
 "#
@@ -345,7 +357,7 @@ async fn index() -> Markup {
             a href="https://github.com/BadMannersXYZ/htmx-ssh-games" target="_blank" {
                 "on Github"
             }
-            ". I'm aware that it's janky, so let's say it's on purpose."
+            ". Desiran chose the dark mode colors."
         }
         p {
             "If you'd like to tip me so I can buy better servers or add more features, check out my "
@@ -619,8 +631,13 @@ async fn unmark_checkbox(
 
 /* Logic handlers */
 
-async fn get_puzzle() -> Result<WebpbnPuzzle> {
-    let id = get_random_puzzle_id().await?;
+async fn get_puzzle(puzzle_count: u32) -> Result<WebpbnPuzzle> {
+    let puzzle_count: usize = puzzle_count.try_into()?;
+    let id = if puzzle_count < WEBPBN_PUZZLE_LIST.len() {
+        WEBPBN_PUZZLE_LIST[puzzle_count]
+    } else {
+        get_random_puzzle_id().await?
+    };
     match get_puzzle_data(id).await {
         Err(e) => {
             warn!(id = id, "Invalid puzzle.");
@@ -664,8 +681,10 @@ fn wait_and_start_new_puzzle(state: AppState) {
     tokio::spawn(async move {
         sleep(Duration::from_secs(10)).await;
         // Fetch next puzzle
+        let mut puzzle_count = state.nonogram.lock().unwrap().puzzle_count;
         let next_puzzle = loop {
-            let puzzle = get_puzzle().await;
+            let puzzle = get_puzzle(puzzle_count).await;
+            puzzle_count += 1;
             if let Ok(puzzle) = puzzle {
                 break puzzle;
             }
@@ -676,6 +695,7 @@ fn wait_and_start_new_puzzle(state: AppState) {
             vec![CheckboxState::Empty; next_puzzle.rows.len() * next_puzzle.columns.len()],
         );
         let duration = get_duration_for_puzzle(next_puzzle.rows.len(), next_puzzle.columns.len());
+        nonogram.puzzle_count = puzzle_count;
         nonogram.puzzle = next_puzzle;
         nonogram.timer.duration = duration;
         nonogram.timer.start = Instant::now();
