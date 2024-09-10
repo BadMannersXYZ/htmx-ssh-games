@@ -18,8 +18,11 @@ hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["full"] }
 maud = { version = "0.26.0", features = ["axum"] }
 rand = "0.8.5"
+random_color = "0.8.0"
 reqwest = "0.12.7"
 russh = "0.45"
+serde = { version = "1.0.210", features = ["derive"] }
+serde_json = "1.0.128"
 termsize = "0.1.9"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1.15", features = ["net", "sync"] }

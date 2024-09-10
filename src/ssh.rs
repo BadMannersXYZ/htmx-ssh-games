@@ -1,8 +1,9 @@
-use std::{sync::Arc, time::Duration};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
-use hyper::service::service_fn;
+use axum::extract::Request;
+use hyper::{body::Incoming, service::service_fn};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto::Builder,
@@ -19,7 +20,7 @@ use tokio::{
 use tower::Service;
 use tracing::{debug, debug_span, info, trace};
 
-use crate::http::ROUTER;
+use crate::{http::ROUTER, unwrap_infallible};
 
 /* Russh session and client */
 
@@ -200,15 +201,23 @@ impl client::Handler for Client {
             originator_port = originator_port,
             "New connection!"
         );
-        let router = ROUTER
+        let address = SocketAddr::new(
+            originator_address.parse().unwrap(),
+            originator_port.try_into().unwrap(),
+        );
+        let mut router = ROUTER
             .get()
-            .with_context(|| "Router hasn't been initialized.")?;
-        let service = service_fn(move |req| router.clone().call(req));
-        let server = Builder::new(TokioExecutor::new());
+            .with_context(|| "Router hasn't been initialized.")?
+            .clone()
+            .into_make_service_with_connect_info::<SocketAddr>();
+        // See https://github.com/tokio-rs/axum/blob/6efcb75d99a437fa80c81e2308ec8234b023e1a7/examples/unix-domain-socket/src/main.rs#L66
+        let tower_service = unwrap_infallible(router.call(address).await);
+        let hyper_service =
+            service_fn(move |req: Request<Incoming>| tower_service.clone().call(req));
         // tokio::spawn is required to let us reply over the data channel.
         tokio::spawn(async move {
-            server
-                .serve_connection_with_upgrades(TokioIo::new(channel.into_stream()), service)
+            Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(TokioIo::new(channel.into_stream()), hyper_service)
                 .await
                 .expect("Invalid request");
         });
