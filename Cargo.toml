@@ -17,6 +17,7 @@ futures = "0.3.30"
 hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["full"] }
 maud = { version = "0.26.0", features = ["axum"] }
+rand = "0.8.5"
 reqwest = "0.12.7"
 russh = "0.45"
 termsize = "0.1.9"

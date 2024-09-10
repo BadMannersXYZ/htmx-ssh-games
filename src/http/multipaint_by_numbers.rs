@@ -4,37 +4,28 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use axum::{
     extract::{Path, State},
     routing::{delete, get, put},
     Router,
 };
-use bitvec::{bitvec, order::Lsb0, slice::BitSlice, vec::BitVec};
-use hyper::StatusCode;
+use bitvec::{order::Lsb0, slice::BitSlice};
+use hyper::{HeaderMap, StatusCode};
 use maud::{html, Markup, PreEscaped, DOCTYPE};
-use reqwest::redirect::Policy;
 use tokio::{
     task::JoinHandle,
     time::{sleep, Instant},
 };
 use tracing::{debug, info, warn};
 
+use crate::webpbpn::{get_puzzle_data, get_random_puzzle_id, WebpbnPuzzle};
+
 #[derive(Copy, Clone, PartialEq)]
 enum NonogramState {
     Unsolved,
     Solved(Duration),
     Failed,
-}
-
-#[derive(Clone)]
-struct Puzzle {
-    id: u32,
-    title: Option<String>,
-    copyright: Option<String>,
-    rows: Vec<Vec<u8>>,
-    columns: Vec<Vec<u8>>,
-    solution: BitVec<usize, Lsb0>,
 }
 
 struct Timer {
@@ -52,7 +43,7 @@ enum CheckboxState {
 
 struct Nonogram {
     state: NonogramState,
-    puzzle: Puzzle,
+    puzzle: WebpbnPuzzle,
     checkboxes: Vec<CheckboxState>,
     timer: Timer,
 }
@@ -62,135 +53,17 @@ struct AppState {
     nonogram: Arc<Mutex<Nonogram>>,
 }
 
-enum GetPuzzleState {
-    Start,
-    ReadingRows,
-    ReadingColumns,
-}
-
-async fn get_puzzle() -> Result<Puzzle> {
-    let client = reqwest::ClientBuilder::new()
-        .redirect(Policy::none())
-        .build()
-        .unwrap();
-    let redirect_response = client
-        .post("https://webpbn.com/random.cgi")
-        .form(&[
-            ("sid", ""),
-            ("go", "1"),
-            ("psize", "1"),
-            ("pcolor", "1"),
-            ("pmulti", "1"),
-            ("pguess", "1"),
-            ("save", "1"),
-        ])
-        .send()
-        .await
-        .unwrap();
-    let location = redirect_response.headers().get("location").unwrap();
-    let id = location
-        .to_str()
-        .unwrap()
-        .split_once("id=")
-        .unwrap()
-        .1
-        .split('&')
-        .next()
-        .unwrap()
-        .parse::<u32>()
-        .unwrap();
-    debug!(id = id, "Fetching puzzle...");
-
-    let client = reqwest::Client::new();
-    let export_response = client
-        .post(format!("https://webpbn.com/export.cgi/webpbn{:06}.non", id))
-        .form(&[
-            ("go", "1"),
-            ("sid", ""),
-            ("id", &id.to_string()),
-            ("xml_clue", "on"),
-            ("xml_soln", "on"),
-            ("fmt", "ss"),
-            ("ss_soln", "on"),
-            ("sg_clue", "on"),
-            ("sg_soln", "on"),
-        ])
-        .send()
-        .await
-        .unwrap()
-        .text()
-        .await
-        .unwrap();
-    let mut title = None;
-    let mut copyright = None;
-    let mut rows = vec![];
-    let mut columns = vec![];
-    let mut solution = bitvec![];
-    let mut state = GetPuzzleState::Start;
-    for line in export_response.lines() {
-        match state {
-            GetPuzzleState::Start => {
-                if line.starts_with("title") {
-                    let mut iter = line.splitn(3, '"');
-                    iter.next().unwrap();
-                    title = Some(String::from(iter.next().unwrap()));
-                } else if line.starts_with("copyright") {
-                    let mut iter = line.splitn(3, '"');
-                    iter.next().unwrap();
-                    copyright = Some(String::from(iter.next().unwrap()));
-                } else if line.starts_with("rows") {
-                    state = GetPuzzleState::ReadingRows;
-                } else if line.starts_with("columns") {
-                    state = GetPuzzleState::ReadingColumns;
-                } else if line.starts_with("goal") {
-                    let mut iter = line.splitn(3, '"');
-                    iter.next().unwrap();
-                    solution.extend(iter.next().unwrap().chars().map(|char| char == '1'));
-                } else if line.starts_with("copyright") {
-                    let mut iter = line.splitn(3, '"');
-                    iter.next().unwrap();
-                    title = Some(String::from(iter.next().unwrap()));
-                }
-            }
-            GetPuzzleState::ReadingRows => {
-                if line.is_empty() {
-                    state = GetPuzzleState::Start;
-                } else {
-                    let row = line
-                        .split(',')
-                        .map(|text| str::parse::<u8>(text).unwrap())
-                        .filter(|&value| value > 0)
-                        .collect::<Vec<_>>();
-                    rows.push(row);
-                }
-            }
-            GetPuzzleState::ReadingColumns => {
-                if line.is_empty() {
-                    state = GetPuzzleState::Start;
-                } else {
-                    let column = line
-                        .split(',')
-                        .map(|text| str::parse::<u8>(text).unwrap())
-                        .filter(|&value| value > 0)
-                        .collect::<Vec<_>>();
-                    columns.push(column);
-                }
-            }
+async fn get_puzzle() -> Result<WebpbnPuzzle> {
+    let id = get_random_puzzle_id().await?;
+    match get_puzzle_data(id).await {
+        Err(e) => {
+            warn!(id = id, "Invalid puzzle.");
+            Err(e)
         }
-    }
-    if rows.is_empty() || columns.is_empty() || solution.is_empty() {
-        warn!(id = id, "Invalid puzzle.");
-        Err(anyhow!("Invalid puzzle"))
-    } else {
-        info!(id = id, "Valid puzzle.");
-        Ok(Puzzle {
-            id,
-            title,
-            copyright,
-            rows,
-            columns,
-            solution,
-        })
+        Ok(puzzle) => {
+            debug!(id = id, "Valid puzzle.");
+            Ok(puzzle)
+        }
     }
 }
 
@@ -239,7 +112,6 @@ pub async fn get_router() -> Router {
     Router::new()
         .route("/", get(index))
         .route("/nonogram", get(nonogram))
-        .route("/timer", get(timer))
         .route("/flag/:id", put(flag_checkbox))
         .route("/flag/:id", delete(unflag_checkbox))
         .route("/checkbox/:id", put(mark_checkbox))
@@ -249,8 +121,15 @@ pub async fn get_router() -> Router {
 
 fn style() -> &'static str {
     r#"
+body {
+    color: #06060c;
+    background-color: #fff;
+}
+.hidden {
+    display: none;
+}
 h2#congratulations {
-    color: darkgreen;
+    color: #060;
 }
 hr {
     margin-top: 28px;
@@ -292,8 +171,8 @@ th:hover::after {
   position: absolute;
   background-color: #ff9;
   left: 0;
-  top: -5000px;
-  height: 10000px;
+  top: -5023px;
+  height: 13337px;
   width: 100%;
   z-index: -1;
 }
@@ -309,10 +188,22 @@ table.solved .checkbox.marked div {
     position: absolute;
     inset: 0;
     z-index: 2;
-    background: black;
+    background: #111;
 }
 input[type="checkbox"] {
     transform: scale(1.33);
+}
+@media(prefers-color-scheme: dark) {
+    body {
+        color: #fff;
+        background-color: #010103;
+    }
+    h2#congratulations {
+        color: #7d7;
+    }
+    table.solved .checkbox.marked div {
+        background: #eee;
+    }
 }
 "#
 }
@@ -324,6 +215,39 @@ document.oncontextmenu = (e) => {
         e.preventDefault();
     }
 };
+let nonogramTimeReference = document.timeline.currentTime;
+let nonogramTimeLeft = null;
+document.addEventListener('nonogramTimeLeft', (e) => {
+    nonogramTimeReference = document.timeline.currentTime;
+    nonogramTimeLeft = e.detail.value;
+});
+function updateFrame(timestamp) {
+    if (Number.isInteger(nonogramTimeLeft)) {
+        let timerElapsed = document.getElementById("timer-elapsed");
+        let timerDone = document.getElementById("timer-done");
+        let timeLeft = nonogramTimeLeft + nonogramTimeReference - timestamp;
+        if (timeLeft <= 0) {
+            if (timerElapsed) {
+                timerElapsed.classList.add("hidden");
+            }
+            if (timerDone) {
+                done.classList.remove("hidden");
+            }
+        } else {
+            if (timerElapsed) {
+                let minutes = Math.floor(timeLeft / 60000);
+                let seconds = Math.floor((timeLeft % 60000) / 1000);
+                timerElapsed.innerText = "Time left: " + minutes + ":" + (seconds < 10 ? "0" : "") + seconds;
+                timerElapsed.classList.remove("hidden");
+            }
+            if (timerDone) {
+                timerDone.classList.add("hidden");
+            }
+        }
+    }
+    requestAnimationFrame(updateFrame);
+}
+requestAnimationFrame(updateFrame);
 "#
 }
 
@@ -345,21 +269,14 @@ async fn index() -> Markup {
     (head())
     body {
         h1 { "Multipaint by Numbers" }
+        hr {}
         main {
             #nonogram hx-get="/nonogram" hx-trigger="load, every 3s" {}
         }
         hr {}
-        p { "Click to mark/unmark. Ctrl+Click to flag." }
+        p { "Click to mark/unmark. Right click or Ctrl+click to flag/unflag." }
         p {
-            "Hey there! If you'd like to tip me so I can buy better servers or add more features, check out my "
-            a href="https://ko-fi.com/badmanners" {
-                "Ko-fi"
-            }
-            ". Thanks!"
-        }
-        }
-        p {
-            "The puzzles are from "
+            "Puzzles are from "
             a href="https://webpbn.com" target="_blank" {
                 "Web Paint-by-Number"
             }
@@ -367,109 +284,130 @@ async fn index() -> Markup {
             a href="https://github.com/BadMannersXYZ/htmx-ssh-games" target="_blank" {
                 "on Github"
             }
-            "."
+            ". I'm aware that it's janky, so let's say it's on purpose."
+        }
+        p {
+            "If you'd like to tip me so I can buy better servers or add more features, check out my "
+            a href="https://ko-fi.com/badmanners" {
+                "Ko-fi"
+            }
+            ". Thanks!"
+        }
         }
     }
 }
 
-async fn timer(State(state): State<AppState>) -> Markup {
-    let nonogram = state.nonogram.lock().unwrap();
-    timer_inner(nonogram.state, &nonogram.timer)
-}
-
-fn timer_inner(puzzle_state: NonogramState, timer: &Timer) -> Markup {
+fn timer(puzzle_state: NonogramState, time_left: Duration) -> Markup {
     if let NonogramState::Solved(success) = puzzle_state {
         let secs = success.as_secs();
         return html! {
-            p {
+            p #timer {
                 "Solved in " (format!("{}:{:02}", secs / 60, secs % 60)) "!"
             }
         };
     };
-    let time_left = timer.duration.saturating_sub(timer.start.elapsed());
-    if time_left == Duration::ZERO {
-        html! {
-            p {
-                "Time's up!"
-            }
-        }
-    } else {
-        let secs = time_left.as_secs();
-        html! {
-            p hx-get="/timer" hx-trigger="every 1s" hx-swap="outerHTML" {
+    let secs = time_left.as_secs();
+    html! {
+        p #timer {
+            span #timer-elapsed .hidden[time_left == Duration::ZERO] {
                 "Time left: " (format!("{}:{:02}", secs / 60, secs % 60))
+            }
+            span #timer-done .hidden[time_left > Duration::ZERO] {
+                "Time's up!"
             }
         }
     }
 }
 
-async fn nonogram(State(state): State<AppState>) -> Markup {
+async fn nonogram(State(state): State<AppState>) -> (HeaderMap, Markup) {
+    let mut headers = HeaderMap::new();
     let nonogram = state.nonogram.lock().unwrap();
     let puzzle = &nonogram.puzzle;
     let checkboxes = &nonogram.checkboxes;
-    let timer = &nonogram.timer;
+    let time_left = nonogram
+        .timer
+        .duration
+        .saturating_sub(nonogram.timer.start.elapsed());
+    match nonogram.state {
+        NonogramState::Solved(_) => {
+            headers.insert(
+                "HX-Trigger",
+                "{\"nonogramTimeLeft\": null}".parse().unwrap(),
+            );
+        }
+        _ => {
+            headers.insert(
+                "HX-Trigger",
+                format!("{{\"nonogramTimeLeft\": {}}}", time_left.as_millis())
+                    .parse()
+                    .unwrap(),
+            );
+        }
+    }
     let puzzle_state = nonogram.state;
     let rows = &puzzle.rows;
     let columns = &puzzle.columns;
     let columns_len = columns.len();
-    html! {
-        @if matches!(puzzle_state, NonogramState::Solved(_)) {
-            h2 #congratulations {
-                "Congratulations!!"
+    (
+        headers,
+        html! {
+            @if matches!(puzzle_state, NonogramState::Solved(_)) {
+                h2 #congratulations {
+                    "Congratulations!!"
+                }
             }
-        }
-        @if let Some(title) = &puzzle.title {
-            h3 {
-                "Puzzle: " (title) " (#" (puzzle.id) ")"
+            @if let Some(title) = &puzzle.title {
+                h3 {
+                    "Puzzle: " (title) " (#" (puzzle.id) ")"
+                }
             }
-        }
-        @if let Some(copyright) = &puzzle.copyright {
-            em .copyright {
-                (PreEscaped(copyright))
+            @if let Some(copyright) = &puzzle.copyright {
+                em .copyright {
+                    (PreEscaped(copyright))
+                }
             }
-        }
-        (timer_inner(
-            puzzle_state,
-            timer,
-        ))
-        hr {}
-        table .solved[matches!(puzzle_state, NonogramState::Solved(_))] {
-            tbody {
-                tr {
-                    td {}
-                    @for column in columns {
-                        th scope="col" {
-                            div {
-                                @for value in column.iter() {
-                                    div {
-                                        (value.to_string())
+            (timer(
+                puzzle_state,
+                time_left,
+            ))
+            table .solved[matches!(puzzle_state, NonogramState::Solved(_))] {
+                tbody {
+                    tr {
+                        td {}
+                        @for column in columns {
+                            th scope="col" {
+                                div {
+                                    @for value in column.iter() {
+                                        div {
+                                            (value.to_string())
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
-                @for (i, row) in rows.iter().enumerate() {
-                    tr {
-                        th scope="row" {
-                            @for value in row.iter() {
-                                div {
-                                    (value.to_string())
+                    @for (i, row) in rows.iter().enumerate() {
+                        tr {
+                            th scope="row" {
+                                @for value in row.iter() {
+                                    div {
+                                        (value.to_string())
+                                    }
                                 }
                             }
-                        }
-                        @let id_range = i * columns_len..(i + 1) * columns_len;
-                        @let slice = &checkboxes[id_range.clone()];
-                        @for (id, &state) in id_range.zip(slice) {
-                            td {
-                                (checkbox(id, puzzle_state != NonogramState::Unsolved, &state))
+                            @let id_range = i * columns_len..(i + 1) * columns_len;
+                            @let slice = &checkboxes[id_range.clone()];
+                            @for (id, &state) in id_range.zip(slice) {
+                                td {
+                                    (checkbox(id, puzzle_state != NonogramState::Unsolved, &state))
+                                }
                             }
                         }
                     }
                 }
             }
-        }
-    }
+        },
+    )
 }
 
 fn checkbox(id: usize, disabled: bool, state: &CheckboxState) -> Markup {
