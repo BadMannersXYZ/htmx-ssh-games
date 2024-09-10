@@ -158,6 +158,9 @@ body {
     background-color: #fff;
     min-height: 100vh;
 }
+a {
+    color: #22e;
+}
 .hidden {
     display: none;
 }
@@ -251,13 +254,13 @@ svg.cursor:hover {
 @media(prefers-color-scheme: dark) {
     body {
         color: #ccc;
-        background-color: #01010c;
+        background-color: #111;
+    }
+    a {
+        color: #4df;
     }
     h2#congratulations {
         color: #7d7;
-    }
-    table.solved .checkbox.marked div {
-        background: #eee;
     }
     tr:hover, td:hover::after, th:hover::after {
         background-color: #663;
