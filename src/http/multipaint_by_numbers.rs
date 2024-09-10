@@ -220,19 +220,20 @@ table.solved .checkbox.marked div {
     background: #111;
 }
 input[type="checkbox"] {
+    z-index: 1;
     transform: scale(1.33);
 }
 #cursors {
     position: absolute;
     inset: 0px;
-    z-index: -2;
+    z-index: 2;
     overflow: visible;
+    pointer-events: none;
 }
 svg.cursor {
     position: absolute;
     top: 0;
     left: 0;
-    z-index: 10;
     pointer-events: none;
     opacity: 0.9;
     transition-property: opacity, transform;
@@ -316,8 +317,8 @@ fn head() -> Markup {
         head {
             meta charset="utf-8";
             title { "Multipaint by Numbers" }
-            // script src="https://unpkg.com/htmx.org@2.0.2" integrity="sha384-Y7hw+L/jvKeWIRRkqWYfPcvVxHzVzn5REgzbawhxAuQGwX1XWe70vji+VSeHOThJ" crossorigin="anonymous" {}
-            script src="https://unpkg.com/htmx.org@2.0.2/dist/htmx.js" integrity="sha384-yZq+5izaUBKcRgFbxgkRYwpHhHHCpp5nseXp0MEQ1A4MTWVMnqkmcuFez8x5qfxr" crossorigin="anonymous" {}
+            script src="https://unpkg.com/htmx.org@2.0.2" integrity="sha384-Y7hw+L/jvKeWIRRkqWYfPcvVxHzVzn5REgzbawhxAuQGwX1XWe70vji+VSeHOThJ" crossorigin="anonymous" {}
+            // script src="https://unpkg.com/htmx.org@2.0.2/dist/htmx.js" integrity="sha384-yZq+5izaUBKcRgFbxgkRYwpHhHHCpp5nseXp0MEQ1A4MTWVMnqkmcuFez8x5qfxr" crossorigin="anonymous" {}
             style { (PreEscaped(style())) }
             script { (PreEscaped(script())) }
         }
@@ -328,7 +329,7 @@ async fn index() -> Markup {
     html! {
     (head())
     body {
-        #cursors hx-post="/cursor" hx-trigger="load, mousemove delay:500ms, every 2s" hx-vals="javascript:{id: id, mouseX: mouseX, mouseY: mouseY}" {}
+        #cursors hx-post="/cursor" hx-trigger="load, mousemove delay:500ms, every 1000ms" hx-vals="javascript:{id: id, mouseX: mouseX, mouseY: mouseY}" {}
         h1 { "Multipaint by Numbers" }
         hr {}
         main {
