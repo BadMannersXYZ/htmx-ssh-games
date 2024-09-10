@@ -134,7 +134,6 @@ pub async fn get_router() -> Router {
         wait_and_start_new_puzzle(state_clone.clone());
     });
     state.nonogram.lock().unwrap().timer.join_handle = Some(join_handle);
-    info!("test");
     Router::new()
         .route("/", get(index))
         .route("/nonogram", get(nonogram))

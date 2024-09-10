@@ -1,4 +1,4 @@
-use std::{iter, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{iter, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use axum::Router;
@@ -22,8 +22,7 @@ pub async fn local_server_entrypoint(hostname: &str, port: u16) -> Result<()> {
             ROUTER
                 .get()
                 .with_context(|| "Router hasn't been initialized.")?,
-        )
-        .into_make_service_with_connect_info::<SocketAddr>(),
+        ),
     )
     .await
     .with_context(|| "Server has closed.")

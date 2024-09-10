@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
@@ -20,7 +20,7 @@ use tokio::{
 use tower::Service;
 use tracing::{debug, debug_span, info, trace};
 
-use crate::{http::ROUTER, unwrap_infallible};
+use crate::http::ROUTER;
 
 /* Russh session and client */
 
@@ -201,19 +201,14 @@ impl client::Handler for Client {
             originator_port = originator_port,
             "New connection!"
         );
-        let address = SocketAddr::new(
-            originator_address.parse().unwrap(),
-            originator_port.try_into().unwrap(),
-        );
-        let mut router = ROUTER
+        let router = ROUTER
             .get()
             .with_context(|| "Router hasn't been initialized.")?
             .clone()
-            .into_make_service_with_connect_info::<SocketAddr>();
+            .into_service();
         // See https://github.com/tokio-rs/axum/blob/6efcb75d99a437fa80c81e2308ec8234b023e1a7/examples/unix-domain-socket/src/main.rs#L66
-        let tower_service = unwrap_infallible(router.call(address).await);
-        let hyper_service =
-            service_fn(move |req: Request<Incoming>| tower_service.clone().call(req));
+        // let tower_service = unwrap_infallible(router.call(address).await);
+        let hyper_service = service_fn(move |req: Request<Incoming>| router.clone().call(req));
         // tokio::spawn is required to let us reply over the data channel.
         tokio::spawn(async move {
             Builder::new(TokioExecutor::new())

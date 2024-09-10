@@ -9,7 +9,7 @@ use reqwest::redirect::Policy;
 /// List of Nonogram puzzles obtained from https://webpbn.com/find.cgi with parameters:
 ///
 /// > `search=1&status=0&minid=&maxid=&title=&author=&minsize=0&maxsize=400&minqual=4&maxqual=20&unqual=1&mindiff=4&maxdiff=15&undiff=1&mincolor=2&maxcolor=2&uniq=1&guess=3&blots=2&showcreate=1&order=0&perpage=0&save_settings=on`
-pub const WEBPBN_PUZZLE_LIST: LazyLock<[u32; 871]> = LazyLock::new(|| {
+pub static WEBPBN_PUZZLE_LIST: LazyLock<[u32; 871]> = LazyLock::new(|| {
     let mut list = [
         23, 141, 252, 439, 748, 831, 1340, 1445, 1568, 1809, 1871, 1915, 2123, 2413, 2676, 3321,
         3339, 3375, 3791, 3994, 4005, 4015, 4051, 4374, 4492, 4494, 4533, 4573, 4610, 4699, 4705,
