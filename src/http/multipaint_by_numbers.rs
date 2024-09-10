@@ -177,7 +177,7 @@ tr:nth-child(5n - 3) {
     border-top-color: #000;
 }
 tr th:nth-child(5n - 3), tr td:nth-child(5n - 3) {
-    border-left: 1pt solid
+    border-left: 1pt solid;
     border-left-color: #000;
 }
 th[scope="col"] {
@@ -251,7 +251,7 @@ svg.cursor:hover {
 @media(prefers-color-scheme: dark) {
     body {
         color: #ccc;
-        background-color: #333;
+        background-color: #01010c;
     }
     h2#congratulations {
         color: #7d7;
@@ -357,7 +357,7 @@ async fn index() -> Markup {
             a href="https://github.com/BadMannersXYZ/htmx-ssh-games" target="_blank" {
                 "on Github"
             }
-            ". Desiran chose the dark mode colors."
+            "."
         }
         p {
             "If you'd like to tip me so I can buy better servers or add more features, check out my "
