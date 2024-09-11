@@ -613,7 +613,7 @@ async fn flag_checkbox(
     }
     if puzzle_state == NonogramState::Unsolved && checkboxes[id] == CheckboxState::Empty {
         let _ = std::mem::replace(&mut checkboxes[id], CheckboxState::Flagged);
-        Ok(checkbox(id, false, &checkboxes[id]))
+        Ok(checkbox(id, false, &CheckboxState::Flagged))
     } else {
         Ok(checkbox(id, true, &checkboxes[id]))
     }
@@ -631,7 +631,7 @@ async fn unflag_checkbox(
     }
     if puzzle_state == NonogramState::Unsolved && checkboxes[id] == CheckboxState::Flagged {
         let _ = std::mem::replace(&mut checkboxes[id], CheckboxState::Empty);
-        Ok(checkbox(id, false, &checkboxes[id]))
+        Ok(checkbox(id, false, &CheckboxState::Empty))
     } else {
         Ok(checkbox(id, true, &checkboxes[id]))
     }
@@ -643,13 +643,14 @@ async fn mark_checkbox(
 ) -> std::result::Result<Markup, StatusCode> {
     let mut nonogram = state.nonogram.lock().unwrap();
     let puzzle_state = nonogram.state;
-    let checkboxes = &nonogram.checkboxes.clone();
     let timer_start = &nonogram.timer.start.clone();
+    let checkboxes = &mut nonogram.checkboxes;
     if checkboxes.get(id).is_none() {
         return Err(StatusCode::NOT_FOUND);
     }
     if puzzle_state == NonogramState::Unsolved && checkboxes[id] != CheckboxState::Marked {
-        let _ = std::mem::replace(&mut nonogram.checkboxes[id], CheckboxState::Marked);
+        let _ = std::mem::replace(&mut checkboxes[id], CheckboxState::Marked);
+        let checkboxes = &checkboxes.clone();
         drop(nonogram);
         if check_if_solved(&state.puzzle.borrow().solution, checkboxes, state.clone()) {
             state.nonogram.lock().unwrap().state = NonogramState::Solved(timer_start.elapsed());
@@ -658,7 +659,7 @@ async fn mark_checkbox(
             Ok(checkbox(id, false, &CheckboxState::Marked))
         }
     } else {
-        Ok(checkbox(id, false, &checkboxes[id]))
+        Ok(checkbox(id, false, &nonogram.checkboxes[id]))
     }
 }
 
@@ -668,13 +669,14 @@ async fn unmark_checkbox(
 ) -> std::result::Result<Markup, StatusCode> {
     let mut nonogram = state.nonogram.lock().unwrap();
     let puzzle_state = nonogram.state;
-    let checkboxes = &nonogram.checkboxes.clone();
     let timer_start = &nonogram.timer.start.clone();
+    let checkboxes = &mut nonogram.checkboxes;
     if checkboxes.get(id).is_none() {
         return Err(StatusCode::NOT_FOUND);
     }
     if puzzle_state == NonogramState::Unsolved && checkboxes[id] == CheckboxState::Marked {
-        let _ = std::mem::replace(&mut nonogram.checkboxes[id], CheckboxState::Empty);
+        let _ = std::mem::replace(&mut checkboxes[id], CheckboxState::Empty);
+        let checkboxes = &checkboxes.clone();
         drop(nonogram);
         if check_if_solved(&state.puzzle.borrow().solution, checkboxes, state.clone()) {
             state.nonogram.lock().unwrap().state = NonogramState::Solved(timer_start.elapsed());
@@ -683,7 +685,7 @@ async fn unmark_checkbox(
             Ok(checkbox(id, false, &CheckboxState::Empty))
         }
     } else {
-        Ok(checkbox(id, false, &checkboxes[id]))
+        Ok(checkbox(id, false, &nonogram.checkboxes[id]))
     }
 }
 
