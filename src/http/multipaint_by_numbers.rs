@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     hash::Hash,
     mem,
-    sync::{Arc, Mutex},
+    sync::{Arc, LazyLock, Mutex},
     time::Duration,
 };
 
@@ -15,6 +15,7 @@ use axum::{
 use bitvec::{order::Lsb0, slice::BitSlice};
 use hyper::{HeaderMap, StatusCode};
 use maud::{html, Markup, PreEscaped, DOCTYPE};
+use rand::Rng;
 use random_color::{Luminosity, RandomColor};
 use serde::Deserialize;
 use tokio::{
@@ -92,6 +93,11 @@ struct CursorsPayload {
     #[serde(rename = "mouseY")]
     mouse_y: i32,
 }
+
+static VERSION: LazyLock<u32> = LazyLock::new(|| {
+    let mut rng = rand::thread_rng();
+    rng.gen()
+});
 
 /* Router definition */
 
@@ -218,25 +224,27 @@ td:hover::after, th:hover::after {
 .checkbox {
     position: relative;
 }
-.checkbox.flagged input:not(:checked) {
-    outline-style: solid;
-    outline-width: 2px;
-    outline-color: #c76;
-}
-table.solved .checkbox.marked div {
+.checkbox .mark {
     position: absolute;
     inset: 0;
     z-index: 2;
+    pointer-events: none;
+}
+table:not(.solved) .checkbox.flagged .mark {
+    background: #c76;
+    border-radius: 2px;
+}
+table.solved .checkbox.marked .mark {
     background: #111;
 }
 input[type="checkbox"] {
     z-index: 1;
-    transform: scale(1.33);
+    transform: scale(1.4);
 }
 #cursors {
     position: absolute;
     inset: 0px;
-    z-index: 2;
+    z-index: 3;
     overflow: visible;
     pointer-events: none;
 }
@@ -244,14 +252,13 @@ svg.cursor {
     position: absolute;
     top: 0;
     left: 0;
-    pointer-events: none;
     opacity: 0.9;
-    transition-property: opacity, transform;
+    transition-property: transform;
     transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
     transition-duration: 150ms;
 }
-svg.cursor:hover {
-    opacity: 0.1;
+.hint {
+    z-index: 4;
 }
 @media(prefers-color-scheme: dark) {
     body {
@@ -278,8 +285,17 @@ svg.cursor:hover {
 
 static SCRIPT: &str = r#"
 document.addEventListener("contextmenu", (e) => {
-    if (e.target.closest(".checkbox")) {
+    if (e.target.closest("\#nonogram-table")) {
         e.preventDefault();
+    }
+});
+
+let multipaintVersion = null;
+document.addEventListener("multipaintVersion", (e) => {
+    if (multipaintVersion === null) {
+        multipaintVersion = e.detail.value;
+    } else if (multipaintVersion !== e.detail.value) {
+        location.reload();
     }
 });
 
@@ -410,14 +426,26 @@ async fn nonogram(State(state): State<AppState>) -> (HeaderMap, Markup) {
     drop(nonogram);
     match puzzle_state {
         NonogramState::Solved(_) => {
-            headers.insert("HX-Trigger", "{\"nonogramTimeLeft\": 0}".parse().unwrap());
+            headers.insert(
+                "HX-Trigger",
+                format!(
+                    "{{\"nonogramTimeLeft\": 0, \"multipaintVersion\": {}}}",
+                    *VERSION
+                )
+                .parse()
+                .unwrap(),
+            );
         }
         _ => {
             headers.insert(
                 "HX-Trigger",
-                format!("{{\"nonogramTimeLeft\": {}}}", time_left.as_millis())
-                    .parse()
-                    .unwrap(),
+                format!(
+                    "{{\"nonogramTimeLeft\": {}, \"multipaintVersion\": {}}}",
+                    time_left.as_millis(),
+                    *VERSION
+                )
+                .parse()
+                .unwrap(),
             );
         }
     }
@@ -447,7 +475,7 @@ async fn nonogram(State(state): State<AppState>) -> (HeaderMap, Markup) {
                 puzzle_state,
                 time_left,
             ))
-            table .solved[matches!(puzzle_state, NonogramState::Solved(_))] {
+            table #nonogram-table .solved[matches!(puzzle_state, NonogramState::Solved(_))] {
                 tbody {
                     tr {
                         td {}
@@ -455,7 +483,7 @@ async fn nonogram(State(state): State<AppState>) -> (HeaderMap, Markup) {
                             th scope="col" {
                                 div {
                                     @for value in column.iter() {
-                                        div {
+                                        .hint {
                                             (value.to_string())
                                         }
                                     }
@@ -467,7 +495,7 @@ async fn nonogram(State(state): State<AppState>) -> (HeaderMap, Markup) {
                         tr {
                             th scope="row" {
                                 @for value in row.iter() {
-                                    div {
+                                    .hint {
                                         (value.to_string())
                                     }
                                 }
@@ -525,12 +553,14 @@ fn checkbox(id: usize, disabled: bool, state: &CheckboxState) -> Markup {
         CheckboxState::Marked => html! {
             .checkbox.marked {
                 input id=(format!("checkbox-{id}")) type="checkbox" disabled[disabled] checked {}
+                .mark {}
                 div hx-delete=(format!("/checkbox/{id}")) hx-trigger=(format!("mousedown[buttons==1] from:#checkbox-{id}, mouseenter[buttons==1] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
             }
         },
         CheckboxState::Flagged if !disabled => html! {
             .checkbox.flagged {
                 input id=(format!("checkbox-{id}")) type="checkbox" disabled[disabled] {}
+                .mark {}
                 div hx-put=(format!("/checkbox/{id}")) hx-trigger=(format!("mousedown[buttons==1] from:#checkbox-{id}, mouseenter[buttons==1] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
                 div hx-delete=(format!("/flag/{id}")) hx-trigger=(format!("mousedown[buttons==2] from:#checkbox-{id}, mouseenter[buttons==2] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
             }
