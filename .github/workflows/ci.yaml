@@ -17,8 +17,8 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            ${{ vars.DOCKERHUB_USERNAME }}/htmx-russh-games
-            ${{ vars.REGISTRY_HOSTNAME }}/${{ vars.REGISTRY_USERNAME }}/htmx-russh-games
+            ${{ vars.DOCKERHUB_USERNAME }}/htmx-ssh-games
+            ${{ vars.REGISTRY_HOSTNAME }}/${{ vars.REGISTRY_USERNAME }}/htmx-ssh-games
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
