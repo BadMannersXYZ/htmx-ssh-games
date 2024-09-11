@@ -383,7 +383,19 @@ async fn htmx_minified() -> &'static [u8] {
 
 async fn index() -> Markup {
     html! {
-    (head())
+    (DOCTYPE)
+    head {
+        meta charset="utf-8";
+        title { "Multipaint by Numbers" }
+        meta property="og:title" content="Multipaint by Numbers" {}
+        meta property="og:url" content="https://multipaint.sish.top" {}
+        meta property="og:description" content="Multiplayer nonogram." {}
+        // script src="https://unpkg.com/htmx.org@2.0.2" integrity="sha384-Y7hw+L/jvKeWIRRkqWYfPcvVxHzVzn5REgzbawhxAuQGwX1XWe70vji+VSeHOThJ" crossorigin="anonymous" {}
+        // script src="https://unpkg.com/htmx.org@2.0.2/dist/htmx.js" integrity="sha384-yZq+5izaUBKcRgFbxgkRYwpHhHHCpp5nseXp0MEQ1A4MTWVMnqkmcuFez8x5qfxr" crossorigin="anonymous" {}
+        script src="/htmx.js" {}
+        style { (PreEscaped(STYLE)) }
+        script { (PreEscaped(SCRIPT)) }
+    }
     body {
         #cursors hx-post="/cursor" hx-trigger="load, mousemove delay:500ms, every 1000ms" hx-vals="javascript:{id: id, mouseX: mouseX, mouseY: mouseY}" {}
         h1 { "Multipaint by Numbers" }
@@ -564,7 +576,7 @@ async fn cursor(State(state): State<AppState>, Form(payload): Form<CursorsPayloa
         })
         .or_insert_with_key(|id| Cursor::new(*id, position));
     cursors.retain(|_, cursor| {
-        cursor.modified_at.duration_since(Instant::now()) <= Duration::from_secs(20)
+        Instant::now().duration_since(cursor.modified_at) <= Duration::from_secs(20)
     });
     html! {
         @for cursor_data in cursors.iter().filter(|(&id, _)| id != cursor_id) {
