@@ -18,6 +18,7 @@ use maud::{html, Markup, PreEscaped, DOCTYPE};
 use random_color::{Luminosity, RandomColor};
 use serde::Deserialize;
 use tokio::{
+    sync::watch::{self, Receiver, Sender},
     task::JoinHandle,
     time::{sleep, Instant},
 };
@@ -50,7 +51,7 @@ enum CheckboxState {
 struct Nonogram {
     puzzle_count: u32,
     state: NonogramState,
-    puzzle: WebpbnPuzzle,
+    puzzle_sender: Sender<WebpbnPuzzle>,
     checkboxes: Vec<CheckboxState>,
     timer: Timer,
 }
@@ -97,6 +98,7 @@ struct CursorsPayload {
 #[derive(Clone)]
 struct AppState {
     nonogram: Arc<Mutex<Nonogram>>,
+    puzzle: Arc<Receiver<WebpbnPuzzle>>,
     cursors: Arc<Mutex<HashMap<CursorId, Cursor>>>,
 }
 
@@ -110,21 +112,22 @@ pub async fn get_router() -> Router {
             break puzzle;
         }
     };
-    let duration = get_duration_for_puzzle(first_puzzle.rows.len(), first_puzzle.columns.len());
+    let rows = first_puzzle.rows.len();
+    let columns = first_puzzle.columns.len();
+    let (tx, rx) = watch::channel(first_puzzle);
+    let duration = get_duration_for_puzzle(rows, columns);
     let state = AppState {
+        puzzle: Arc::new(rx),
         nonogram: Arc::new(Mutex::new(Nonogram {
             puzzle_count,
-            checkboxes: vec![
-                CheckboxState::Empty;
-                first_puzzle.rows.len() * first_puzzle.columns.len()
-            ],
+            checkboxes: vec![CheckboxState::Empty; rows * columns],
             timer: Timer {
                 start: Instant::now(),
                 duration,
                 join_handle: None,
             },
             state: NonogramState::Unsolved,
-            puzzle: first_puzzle,
+            puzzle_sender: tx,
         })),
         cursors: Arc::new(Mutex::new(HashMap::new())),
     };
@@ -151,8 +154,7 @@ pub async fn get_router() -> Router {
 
 /* Main page elements */
 
-fn style() -> &'static str {
-    r#"
+static STYLE: &str = r#"
 body {
     color: #06060c;
     background-color: #fff;
@@ -204,14 +206,14 @@ td, th {
     position: relative;
 }
 td:hover::after, th:hover::after {
-  content: "";
-  position: absolute;
-  background-color: #ff9;
-  left: 0;
-  top: -5023px;
-  height: 13337px;
-  width: 100%;
-  z-index: -1;
+    content: "";
+    position: absolute;
+    background-color: #ff9;
+    left: 0;
+    top: -5023px;
+    height: 13337px;
+    width: 100%;
+    z-index: -1;
 }
 .checkbox {
     position: relative;
@@ -272,16 +274,15 @@ svg.cursor:hover {
         border-left-color: #fff;
     }
 }
-"#
-}
+"#;
 
-fn script() -> &'static str {
-    r#"
+static SCRIPT: &str = r#"
 document.addEventListener("contextmenu", (e) => {
     if (e.target.closest(".checkbox")) {
         e.preventDefault();
     }
 });
+
 let id = crypto.getRandomValues(new BigUint64Array(1))[0];
 let mouseX = 0;
 let mouseY = 0;
@@ -289,6 +290,7 @@ document.addEventListener("mousemove", (e) => {
     mouseX = e.pageX;
     mouseY = e.pageY;
 });
+
 let baseTimestamp = document.timeline.currentTime;
 let nonogramTimeLeft = null;
 document.addEventListener("nonogramTimeLeft", (e) => {
@@ -322,8 +324,7 @@ function updateFrame(currentTimestamp) {
     requestAnimationFrame(updateFrame);
 }
 requestAnimationFrame(updateFrame);
-"#
-}
+"#;
 
 fn head() -> Markup {
     html! {
@@ -333,8 +334,8 @@ fn head() -> Markup {
             title { "Multipaint by Numbers" }
             script src="https://unpkg.com/htmx.org@2.0.2" integrity="sha384-Y7hw+L/jvKeWIRRkqWYfPcvVxHzVzn5REgzbawhxAuQGwX1XWe70vji+VSeHOThJ" crossorigin="anonymous" {}
             // script src="https://unpkg.com/htmx.org@2.0.2/dist/htmx.js" integrity="sha384-yZq+5izaUBKcRgFbxgkRYwpHhHHCpp5nseXp0MEQ1A4MTWVMnqkmcuFez8x5qfxr" crossorigin="anonymous" {}
-            style { (PreEscaped(style())) }
-            script { (PreEscaped(script())) }
+            style { (PreEscaped(STYLE)) }
+            script { (PreEscaped(SCRIPT)) }
         }
     }
 }
@@ -350,7 +351,7 @@ async fn index() -> Markup {
             #nonogram hx-get="/nonogram" hx-trigger="load, every 3s" {}
         }
         hr {}
-        p { "Click to mark/unmark. Right click or Ctrl+click to flag/unflag." }
+        p { "Click to mark/unmark. Right click to flag/unflag." }
         p {
             "Puzzles are from "
             a href="https://webpbn.com" target="_blank" {
@@ -400,18 +401,16 @@ fn timer(puzzle_state: NonogramState, time_left: Duration) -> Markup {
 async fn nonogram(State(state): State<AppState>) -> (HeaderMap, Markup) {
     let mut headers = HeaderMap::new();
     let nonogram = state.nonogram.lock().unwrap();
-    let puzzle = &nonogram.puzzle;
-    let checkboxes = &nonogram.checkboxes;
+    let checkboxes = &nonogram.checkboxes.clone();
     let time_left = nonogram
         .timer
         .duration
         .saturating_sub(nonogram.timer.start.elapsed());
-    match nonogram.state {
+    let puzzle_state = nonogram.state;
+    drop(nonogram);
+    match puzzle_state {
         NonogramState::Solved(_) => {
-            headers.insert(
-                "HX-Trigger",
-                "{\"nonogramTimeLeft\": null}".parse().unwrap(),
-            );
+            headers.insert("HX-Trigger", "{\"nonogramTimeLeft\": 0}".parse().unwrap());
         }
         _ => {
             headers.insert(
@@ -422,7 +421,7 @@ async fn nonogram(State(state): State<AppState>) -> (HeaderMap, Markup) {
             );
         }
     }
-    let puzzle_state = nonogram.state;
+    let puzzle = state.puzzle.borrow();
     let rows = &puzzle.rows;
     let columns = &puzzle.columns;
     let columns_len = columns.len();
@@ -526,21 +525,22 @@ fn checkbox(id: usize, disabled: bool, state: &CheckboxState) -> Markup {
         CheckboxState::Marked => html! {
             .checkbox.marked {
                 input id=(format!("checkbox-{id}")) type="checkbox" disabled[disabled] checked {}
-                div hx-delete=(format!("/checkbox/{}", id)) hx-trigger=(format!("click from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
+                div hx-delete=(format!("/checkbox/{id}")) hx-trigger=(format!("mousedown[buttons==1] from:#checkbox-{id}, mouseenter[buttons==1] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
             }
         },
         CheckboxState::Flagged if !disabled => html! {
             .checkbox.flagged {
                 input id=(format!("checkbox-{id}")) type="checkbox" disabled[disabled] {}
-                div hx-put=(format!("/checkbox/{}", id)) hx-trigger=(format!("click[!ctrlKey] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
-                div hx-delete=(format!("/flag/{}", id)) hx-trigger=(format!("click[ctrlKey] from:#checkbox-{id},contextmenu from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
+                div hx-put=(format!("/checkbox/{id}")) hx-trigger=(format!("mousedown[buttons==1] from:#checkbox-{id}, mouseenter[buttons==1] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
+                div hx-delete=(format!("/flag/{id}")) hx-trigger=(format!("mousedown[buttons==2] from:#checkbox-{id}, mouseenter[buttons==2] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
             }
         },
         _ => html! {
             .checkbox.empty {
                 input id=(format!("checkbox-{id}")) type="checkbox" disabled[disabled] {}
-                div hx-put=(format!("/checkbox/{}", id)) hx-trigger=(format!("click[!ctrlKey] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
-                div hx-put=(format!("/flag/{}", id)) hx-trigger=(format!("click[ctrlKey] from:#checkbox-{id}, contextmenu from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
+                // div hx-put=(format!("/checkbox/{id}")) hx-trigger=(format!("click from:#checkbox-{id}, mouseenter from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
+                div hx-put=(format!("/checkbox/{id}")) hx-trigger=(format!("mousedown[buttons==1] from:#checkbox-{id}, mouseenter[buttons==1] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
+                div hx-put=(format!("/flag/{id}")) hx-trigger=(format!("mousedown[buttons==2] from:#checkbox-{id}, mouseenter[buttons==2] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
             }
         },
     }
@@ -589,14 +589,13 @@ async fn mark_checkbox(
     let mut nonogram = state.nonogram.lock().unwrap();
     let puzzle_state = nonogram.state;
     let checkboxes = &nonogram.checkboxes.clone();
-    let puzzle = &nonogram.puzzle.clone();
     let timer_start = &nonogram.timer.start.clone();
     if checkboxes.get(id).is_none() {
         return Err(StatusCode::NOT_FOUND);
     }
     if puzzle_state == NonogramState::Unsolved {
         let _ = std::mem::replace(&mut nonogram.checkboxes[id], CheckboxState::Marked);
-        if check_if_solved(&puzzle.solution, checkboxes, state.clone()) {
+        if check_if_solved(&state.puzzle.borrow().solution, checkboxes, state.clone()) {
             nonogram.state = NonogramState::Solved(timer_start.elapsed());
             Ok(checkbox(id, true, &CheckboxState::Marked))
         } else {
@@ -614,14 +613,13 @@ async fn unmark_checkbox(
     let mut nonogram = state.nonogram.lock().unwrap();
     let puzzle_state = nonogram.state;
     let checkboxes = &nonogram.checkboxes.clone();
-    let puzzle = &nonogram.puzzle.clone();
     let timer_start = &nonogram.timer.start.clone();
     if checkboxes.get(id).is_none() {
         return Err(StatusCode::NOT_FOUND);
     }
     if puzzle_state == NonogramState::Unsolved {
         let _ = std::mem::replace(&mut nonogram.checkboxes[id], CheckboxState::Empty);
-        if check_if_solved(&puzzle.solution, checkboxes, state.clone()) {
+        if check_if_solved(&state.puzzle.borrow().solution, checkboxes, state.clone()) {
             nonogram.state = NonogramState::Solved(timer_start.elapsed());
             Ok(checkbox(id, true, &CheckboxState::Empty))
         } else {
@@ -699,7 +697,7 @@ fn wait_and_start_new_puzzle(state: AppState) {
         );
         let duration = get_duration_for_puzzle(next_puzzle.rows.len(), next_puzzle.columns.len());
         nonogram.puzzle_count = puzzle_count;
-        nonogram.puzzle = next_puzzle;
+        nonogram.puzzle_sender.send_replace(next_puzzle);
         nonogram.timer.duration = duration;
         nonogram.timer.start = Instant::now();
         nonogram.state = NonogramState::Unsolved;
