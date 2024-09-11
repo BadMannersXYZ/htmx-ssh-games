@@ -25,7 +25,7 @@ use tokio::{
 };
 use tracing::{debug, info, warn};
 
-use crate::webpbpn::{get_puzzle_data, get_random_puzzle_id, WebpbnPuzzle, WEBPBN_PUZZLE_LIST};
+use crate::webpbn::{get_puzzle_data, get_random_puzzle_id, WebpbnPuzzle, WEBPBN_PUZZLE_LIST};
 
 /* Type defintions */
 
@@ -149,6 +149,7 @@ pub async fn get_router() -> Router {
     state.nonogram.lock().unwrap().timer.join_handle = Some(join_handle);
     Router::new()
         .route("/", get(index))
+        .route("/htmx.js", get(htmx_minified))
         .route("/nonogram", get(nonogram))
         .route("/cursor", post(cursor))
         .route("/flag/:id", put(flag_checkbox))
@@ -224,11 +225,13 @@ td:hover::after, th:hover::after {
 .checkbox {
     position: relative;
 }
+.checkbox div {
+    pointer-events: none;
+}
 .checkbox .mark {
     position: absolute;
     inset: 0;
     z-index: 2;
-    pointer-events: none;
 }
 table:not(.solved) .checkbox.flagged .mark {
     background: #c76;
@@ -243,7 +246,6 @@ input[type="checkbox"] {
 }
 #cursors {
     position: absolute;
-    inset: 0px;
     z-index: 3;
     overflow: visible;
     pointer-events: none;
@@ -285,7 +287,7 @@ svg.cursor {
 
 static SCRIPT: &str = r#"
 document.addEventListener("contextmenu", (e) => {
-    if (e.target.closest("\#nonogram-table")) {
+    if (e.target.closest("td")) {
         e.preventDefault();
     }
 });
@@ -299,12 +301,30 @@ document.addEventListener("multipaintVersion", (e) => {
     }
 });
 
+let isTouchDevice = (navigator.maxTouchPoints > 0 || navigator.msMaxTouchPoints > 0);
+if (!isTouchDevice) {
+    document.addEventListener("touchstart", (e) => {
+        isTouchDevice = true;
+    }, {
+        once: true,
+    });
+}
+
 let id = crypto.getRandomValues(new BigUint64Array(1))[0];
+let table = null;
+let cursors = null;
 let mouseX = 0;
 let mouseY = 0;
 document.addEventListener("mousemove", (e) => {
-    mouseX = e.pageX;
-    mouseY = e.pageY;
+    if (table === null || cursors === null) {
+        table = document.querySelector("table");
+        cursors = document.getElementById("cursors");
+    }
+    let tableBbox = table.getBoundingClientRect();
+    mouseX = e.pageX - tableBbox.left;
+    mouseY = e.pageY - tableBbox.top;
+    cursors.style.top = tableBbox.top;
+    cursors.style.left = tableBbox.left;
 });
 
 let baseTimestamp = document.timeline.currentTime;
@@ -348,12 +368,17 @@ fn head() -> Markup {
         head {
             meta charset="utf-8";
             title { "Multipaint by Numbers" }
-            script src="https://unpkg.com/htmx.org@2.0.2" integrity="sha384-Y7hw+L/jvKeWIRRkqWYfPcvVxHzVzn5REgzbawhxAuQGwX1XWe70vji+VSeHOThJ" crossorigin="anonymous" {}
+            // script src="https://unpkg.com/htmx.org@2.0.2" integrity="sha384-Y7hw+L/jvKeWIRRkqWYfPcvVxHzVzn5REgzbawhxAuQGwX1XWe70vji+VSeHOThJ" crossorigin="anonymous" {}
             // script src="https://unpkg.com/htmx.org@2.0.2/dist/htmx.js" integrity="sha384-yZq+5izaUBKcRgFbxgkRYwpHhHHCpp5nseXp0MEQ1A4MTWVMnqkmcuFez8x5qfxr" crossorigin="anonymous" {}
+            script src="/htmx.js" {}
             style { (PreEscaped(STYLE)) }
             script { (PreEscaped(SCRIPT)) }
         }
     }
+}
+
+async fn htmx_minified() -> &'static [u8] {
+    include_bytes!("../htmx.min.js")
 }
 
 async fn index() -> Markup {
@@ -364,10 +389,10 @@ async fn index() -> Markup {
         h1 { "Multipaint by Numbers" }
         hr {}
         main {
-            #nonogram hx-get="/nonogram" hx-trigger="load, every 3s" {}
+            #nonogram hx-get="/nonogram" hx-trigger="load, every 2s" {}
         }
         hr {}
-        p { "Click to mark/unmark. Right click to flag/unflag." }
+        p { "Click to mark, right click to flag. Mobile devices don't support flags for now." }
         p {
             "Puzzles are from "
             a href="https://webpbn.com" target="_blank" {
@@ -377,7 +402,7 @@ async fn index() -> Markup {
             a href="https://github.com/BadMannersXYZ/htmx-ssh-games" target="_blank" {
                 "on Github"
             }
-            "."
+            ". I know it's jank :^)"
         }
         p {
             "If you'd like to tip me so I can buy better servers or add more features, check out my "
@@ -503,7 +528,7 @@ async fn nonogram(State(state): State<AppState>) -> (HeaderMap, Markup) {
                             @let id_range = i * columns_len..(i + 1) * columns_len;
                             @let slice = &checkboxes[id_range.clone()];
                             @for (id, &state) in id_range.zip(slice) {
-                                td {
+                                td.checkbox-cell {
                                     (checkbox(id, puzzle_state != NonogramState::Unsolved, &state))
                                 }
                             }
@@ -562,15 +587,15 @@ fn checkbox(id: usize, disabled: bool, state: &CheckboxState) -> Markup {
                 input id=(format!("checkbox-{id}")) type="checkbox" disabled[disabled] {}
                 .mark {}
                 div hx-put=(format!("/checkbox/{id}")) hx-trigger=(format!("mousedown[buttons==1] from:#checkbox-{id}, mouseenter[buttons==1] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
-                div hx-delete=(format!("/flag/{id}")) hx-trigger=(format!("mousedown[buttons==2] from:#checkbox-{id}, mouseenter[buttons==2] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
+                div hx-delete=(format!("/flag/{id}")) hx-trigger=(format!("mousedown[buttons==2] from:#checkbox-{id}, contextmenu[isTouchDevice] from:closest .checkbox-cell, mouseenter[buttons==2] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
             }
         },
         _ => html! {
             .checkbox.empty {
                 input id=(format!("checkbox-{id}")) type="checkbox" disabled[disabled] {}
-                // div hx-put=(format!("/checkbox/{id}")) hx-trigger=(format!("click from:#checkbox-{id}, mouseenter from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
+                .mark {}
                 div hx-put=(format!("/checkbox/{id}")) hx-trigger=(format!("mousedown[buttons==1] from:#checkbox-{id}, mouseenter[buttons==1] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
-                div hx-put=(format!("/flag/{id}")) hx-trigger=(format!("mousedown[buttons==2] from:#checkbox-{id}, mouseenter[buttons==2] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
+                div hx-put=(format!("/flag/{id}")) hx-trigger=(format!("mousedown[buttons==2] from:#checkbox-{id}, contextmenu[isTouchDevice] from:closest .checkbox-cell, mouseenter[buttons==2] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
             }
         },
     }
@@ -586,7 +611,7 @@ async fn flag_checkbox(
     if checkboxes.get(id).is_none() {
         return Err(StatusCode::NOT_FOUND);
     }
-    if puzzle_state == NonogramState::Unsolved {
+    if puzzle_state == NonogramState::Unsolved && checkboxes[id] == CheckboxState::Empty {
         let _ = std::mem::replace(&mut checkboxes[id], CheckboxState::Flagged);
         Ok(checkbox(id, false, &checkboxes[id]))
     } else {
@@ -604,7 +629,7 @@ async fn unflag_checkbox(
     if checkboxes.get(id).is_none() {
         return Err(StatusCode::NOT_FOUND);
     }
-    if puzzle_state == NonogramState::Unsolved {
+    if puzzle_state == NonogramState::Unsolved && checkboxes[id] == CheckboxState::Flagged {
         let _ = std::mem::replace(&mut checkboxes[id], CheckboxState::Empty);
         Ok(checkbox(id, false, &checkboxes[id]))
     } else {
@@ -623,10 +648,11 @@ async fn mark_checkbox(
     if checkboxes.get(id).is_none() {
         return Err(StatusCode::NOT_FOUND);
     }
-    if puzzle_state == NonogramState::Unsolved {
+    if puzzle_state == NonogramState::Unsolved && checkboxes[id] != CheckboxState::Marked {
         let _ = std::mem::replace(&mut nonogram.checkboxes[id], CheckboxState::Marked);
+        drop(nonogram);
         if check_if_solved(&state.puzzle.borrow().solution, checkboxes, state.clone()) {
-            nonogram.state = NonogramState::Solved(timer_start.elapsed());
+            state.nonogram.lock().unwrap().state = NonogramState::Solved(timer_start.elapsed());
             Ok(checkbox(id, true, &CheckboxState::Marked))
         } else {
             Ok(checkbox(id, false, &CheckboxState::Marked))
@@ -647,10 +673,11 @@ async fn unmark_checkbox(
     if checkboxes.get(id).is_none() {
         return Err(StatusCode::NOT_FOUND);
     }
-    if puzzle_state == NonogramState::Unsolved {
+    if puzzle_state == NonogramState::Unsolved && checkboxes[id] == CheckboxState::Marked {
         let _ = std::mem::replace(&mut nonogram.checkboxes[id], CheckboxState::Empty);
+        drop(nonogram);
         if check_if_solved(&state.puzzle.borrow().solution, checkboxes, state.clone()) {
-            nonogram.state = NonogramState::Solved(timer_start.elapsed());
+            state.nonogram.lock().unwrap().state = NonogramState::Solved(timer_start.elapsed());
             Ok(checkbox(id, true, &CheckboxState::Empty))
         } else {
             Ok(checkbox(id, false, &CheckboxState::Empty))
