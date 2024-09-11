@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum::{
     extract::{Path, State},
     routing::{delete, get, post, put},
@@ -15,7 +15,7 @@ use axum::{
 use bitvec::{order::Lsb0, slice::BitSlice};
 use hyper::{HeaderMap, StatusCode};
 use maud::{html, Markup, PreEscaped, DOCTYPE};
-use rand::Rng;
+use rand::{seq::SliceRandom, thread_rng, Rng};
 use random_color::{Luminosity, RandomColor};
 use serde::Deserialize;
 use tokio::{
@@ -25,7 +25,7 @@ use tokio::{
 };
 use tracing::{debug, info, warn};
 
-use crate::webpbn::{get_puzzle_data, get_random_puzzle_id, WebpbnPuzzle, WEBPBN_PUZZLE_LIST};
+use crate::nonogram::nonogrammed::{get_puzzle_data, NonogrammedPuzzle, NONOGRAMMED_PUZZLE_LIST};
 
 /* Type defintions */
 
@@ -52,7 +52,7 @@ enum CheckboxState {
 struct Nonogram {
     puzzle_count: u32,
     state: NonogramState,
-    puzzle_sender: Sender<WebpbnPuzzle>,
+    puzzle_sender: Sender<NonogrammedPuzzle>,
     checkboxes: Vec<CheckboxState>,
     timer: Timer,
 }
@@ -104,7 +104,7 @@ static VERSION: LazyLock<u32> = LazyLock::new(|| {
 #[derive(Clone)]
 struct AppState {
     nonogram: Arc<Mutex<Nonogram>>,
-    puzzle: Arc<Receiver<WebpbnPuzzle>>,
+    puzzle: Arc<Receiver<NonogrammedPuzzle>>,
     cursors: Arc<Mutex<HashMap<CursorId, Cursor>>>,
 }
 
@@ -362,21 +362,6 @@ function updateFrame(currentTimestamp) {
 requestAnimationFrame(updateFrame);
 "#;
 
-fn head() -> Markup {
-    html! {
-        (DOCTYPE)
-        head {
-            meta charset="utf-8";
-            title { "Multipaint by Numbers" }
-            // script src="https://unpkg.com/htmx.org@2.0.2" integrity="sha384-Y7hw+L/jvKeWIRRkqWYfPcvVxHzVzn5REgzbawhxAuQGwX1XWe70vji+VSeHOThJ" crossorigin="anonymous" {}
-            // script src="https://unpkg.com/htmx.org@2.0.2/dist/htmx.js" integrity="sha384-yZq+5izaUBKcRgFbxgkRYwpHhHHCpp5nseXp0MEQ1A4MTWVMnqkmcuFez8x5qfxr" crossorigin="anonymous" {}
-            script src="/htmx.js" {}
-            style { (PreEscaped(STYLE)) }
-            script { (PreEscaped(SCRIPT)) }
-        }
-    }
-}
-
 async fn htmx_minified() -> &'static [u8] {
     include_bytes!("../htmx.min.js")
 }
@@ -407,21 +392,14 @@ async fn index() -> Markup {
         p { "Click to mark, right click to flag. Mobile devices don't support flags for now." }
         p {
             "Puzzles are from "
-            a href="https://webpbn.com" target="_blank" {
-                "Web Paint-by-Number"
+            a href="https://nonogrammed.com/" target="_blank" {
+                "Nonogrammed"
             }
             ". The source code for this website is "
             a href="https://github.com/BadMannersXYZ/htmx-ssh-games" target="_blank" {
                 "on Github"
             }
             ". I know it's jank :^)"
-        }
-        p {
-            "If you'd like to tip me so I can buy better servers or add more features, check out my "
-            a href="https://ko-fi.com/badmanners" {
-                "Ko-fi"
-            }
-            ". Thanks!"
         }
         }
     }
@@ -703,16 +681,16 @@ async fn unmark_checkbox(
 
 /* Logic handlers */
 
-async fn get_puzzle(puzzle_count: u32) -> Result<WebpbnPuzzle> {
+async fn get_puzzle(puzzle_count: u32) -> Result<NonogrammedPuzzle> {
     let puzzle_count: usize = puzzle_count.try_into()?;
-    let id = if puzzle_count < WEBPBN_PUZZLE_LIST.len() {
-        WEBPBN_PUZZLE_LIST[puzzle_count]
+    let id = if puzzle_count < NONOGRAMMED_PUZZLE_LIST.len() {
+        NONOGRAMMED_PUZZLE_LIST[puzzle_count]
     } else {
-        get_random_puzzle_id().await?
+        *NONOGRAMMED_PUZZLE_LIST.choose(&mut thread_rng()).unwrap()
     };
     match get_puzzle_data(id).await {
         Err(e) => {
-            warn!(id = id, "Invalid puzzle.");
+            warn!(error = ?e, id = id, "Invalid puzzle.");
             Err(e)
         }
         Ok(puzzle) => {
@@ -722,11 +700,11 @@ async fn get_puzzle(puzzle_count: u32) -> Result<WebpbnPuzzle> {
     }
 }
 
-//  5 x  5:  393s
-// 10 x 10:  891s
-// 20 x 20: 2019s
+//  5 x  5:  367s
+// 10 x 10:  685s
+// 20 x 20: 1277s
 fn get_duration_for_puzzle(rows: usize, columns: usize) -> Duration {
-    Duration::from_secs(f32::powf(1000f32 * rows as f32 * columns as f32, 0.59) as u64)
+    Duration::from_secs(f32::powf(20_000f32 * rows as f32 * columns as f32, 0.45) as u64)
 }
 
 fn check_if_solved(
@@ -744,7 +722,7 @@ fn check_if_solved(
         let state_clone = state.clone();
         wait_and_start_new_puzzle(state_clone);
     } else {
-        info!("There are {wrong_squares} wrong squares!");
+        debug!("There are {wrong_squares} wrong squares!");
     }
     is_solved
 }

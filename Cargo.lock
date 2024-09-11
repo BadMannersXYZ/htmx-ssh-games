@@ -931,6 +931,7 @@ dependencies = [
  "maud",
  "rand",
  "random_color",
+ "regex",
  "reqwest",
  "russh",
  "serde",

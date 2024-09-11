@@ -19,6 +19,7 @@ hyper-util = { version = "0.1", features = ["full"] }
 maud = { version = "0.26.0", features = ["axum"] }
 rand = "0.8.5"
 random_color = "0.8.0"
+regex = "1.10.6"
 reqwest = "0.12.7"
 russh = "0.45"
 serde = { version = "1.0.210", features = ["derive"] }
