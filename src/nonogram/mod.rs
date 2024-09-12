@@ -1,16 +1,8 @@
-use anyhow::{anyhow, Context, Result};
-use bitvec::{bitvec, order::Lsb0, slice::BitSlice, vec::BitVec};
+use anyhow::{anyhow, Result};
+use bitvec::slice::BitSlice;
 
 pub mod nonogrammed;
 pub mod webpbn;
-
-pub trait Puzzle {
-    fn title() -> Option<String>;
-    fn copyright() -> Option<String>;
-    fn rows() -> Vec<Vec<u8>>;
-    fn columns() -> Vec<Vec<u8>>;
-    fn solution() -> BitVec<usize, Lsb0>;
-}
 
 pub struct PopulatedBoard {
     pub rows: Vec<Vec<u8>>,
@@ -51,6 +43,7 @@ pub fn populate_board(solution: &BitSlice, rows: u16, columns: u16) -> Result<Po
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bitvec::{bitvec, order::Lsb0};
 
     #[test]
     fn it_creates_a_valid_board() {

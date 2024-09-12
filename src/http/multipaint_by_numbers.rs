@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use axum::{
     extract::{Path, State},
     routing::{delete, get, post, put},
@@ -23,7 +23,7 @@ use tokio::{
     task::JoinHandle,
     time::{sleep, Instant},
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use crate::nonogram::nonogrammed::{get_puzzle_data, NonogrammedPuzzle, NONOGRAMMED_PUZZLE_LIST};
 
@@ -50,7 +50,7 @@ enum CheckboxState {
 }
 
 struct Nonogram {
-    puzzle_count: u32,
+    puzzle_list: Vec<u32>,
     state: NonogramState,
     puzzle_sender: Sender<NonogrammedPuzzle>,
     checkboxes: Vec<CheckboxState>,
@@ -110,12 +110,20 @@ struct AppState {
 
 /// A lazily-created Router, to be used by the SSH client tunnels.
 pub async fn get_router() -> Router {
-    let mut puzzle_count = 0;
+    let mut puzzle_vec = NONOGRAMMED_PUZZLE_LIST.to_vec();
+    puzzle_vec.shuffle(&mut thread_rng());
     let first_puzzle = loop {
-        let puzzle = get_puzzle(puzzle_count).await;
-        puzzle_count += 1;
-        if let Ok(puzzle) = puzzle {
-            break puzzle;
+        match puzzle_vec.pop() {
+            None => {
+                puzzle_vec.extend_from_slice(&NONOGRAMMED_PUZZLE_LIST);
+                puzzle_vec.shuffle(&mut thread_rng());
+            }
+            Some(puzzle_id) => {
+                let puzzle = get_puzzle(puzzle_id).await;
+                if let Ok(puzzle) = puzzle {
+                    break puzzle;
+                }
+            }
         }
     };
     let rows = first_puzzle.rows.len();
@@ -125,7 +133,7 @@ pub async fn get_router() -> Router {
     let state = AppState {
         puzzle: Arc::new(rx),
         nonogram: Arc::new(Mutex::new(Nonogram {
-            puzzle_count,
+            puzzle_list: puzzle_vec,
             checkboxes: vec![CheckboxState::Empty; rows * columns],
             timer: Timer {
                 start: Instant::now(),
@@ -391,7 +399,7 @@ async fn index() -> Markup {
         hr {}
         p { "Click to mark, right click to flag. Mobile devices don't support flags for now." }
         p {
-            "Puzzles are from "
+            "Puzzles from "
             a href="https://nonogrammed.com/" target="_blank" {
                 "Nonogrammed"
             }
@@ -681,20 +689,14 @@ async fn unmark_checkbox(
 
 /* Logic handlers */
 
-async fn get_puzzle(puzzle_count: u32) -> Result<NonogrammedPuzzle> {
-    let puzzle_count: usize = puzzle_count.try_into()?;
-    let id = if puzzle_count < NONOGRAMMED_PUZZLE_LIST.len() {
-        NONOGRAMMED_PUZZLE_LIST[puzzle_count]
-    } else {
-        *NONOGRAMMED_PUZZLE_LIST.choose(&mut thread_rng()).unwrap()
-    };
-    match get_puzzle_data(id).await {
+async fn get_puzzle(puzzle_id: u32) -> Result<NonogrammedPuzzle> {
+    match get_puzzle_data(puzzle_id).await {
         Err(e) => {
-            warn!(error = ?e, id = id, "Invalid puzzle.");
+            warn!(error = ?e, id = puzzle_id, "Invalid puzzle.");
             Err(e)
         }
         Ok(puzzle) => {
-            debug!(id = id, "Valid puzzle.");
+            debug!(id = puzzle_id, "Valid puzzle.");
             Ok(puzzle)
         }
     }
@@ -730,13 +732,21 @@ fn check_if_solved(
 fn wait_and_start_new_puzzle(state: AppState) {
     tokio::spawn(async move {
         sleep(Duration::from_secs(10)).await;
-        // Fetch next puzzle
-        let mut puzzle_count = state.nonogram.lock().unwrap().puzzle_count;
+        // Fetch next puzzle (this is a bit inneficient)
         let next_puzzle = loop {
-            let puzzle = get_puzzle(puzzle_count).await;
-            puzzle_count += 1;
-            if let Ok(puzzle) = puzzle {
-                break puzzle;
+            let puzzle_id = state.nonogram.lock().unwrap().puzzle_list.pop().clone();
+            match puzzle_id {
+                None => {
+                    let puzzle_vec = &mut state.nonogram.lock().unwrap().puzzle_list;
+                    puzzle_vec.extend_from_slice(&NONOGRAMMED_PUZZLE_LIST);
+                    puzzle_vec.shuffle(&mut thread_rng());
+                }
+                Some(puzzle_id) => {
+                    let puzzle = get_puzzle(puzzle_id).await;
+                    if let Ok(puzzle) = puzzle {
+                        break puzzle;
+                    }
+                }
             }
         };
         let mut nonogram = state.nonogram.lock().unwrap();
@@ -745,7 +755,6 @@ fn wait_and_start_new_puzzle(state: AppState) {
             vec![CheckboxState::Empty; next_puzzle.rows.len() * next_puzzle.columns.len()],
         );
         let duration = get_duration_for_puzzle(next_puzzle.rows.len(), next_puzzle.columns.len());
-        nonogram.puzzle_count = puzzle_count;
         nonogram.puzzle_sender.send_replace(next_puzzle);
         nonogram.timer.duration = duration;
         nonogram.timer.start = Instant::now();
