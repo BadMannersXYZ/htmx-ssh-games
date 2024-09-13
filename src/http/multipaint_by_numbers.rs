@@ -9,7 +9,7 @@ use std::{
 use anyhow::Result;
 use axum::{
     extract::{Path, State},
-    routing::{delete, get, post, put},
+    routing::{get, post, put},
     Form, Router,
 };
 use bitvec::{order::Lsb0, slice::BitSlice};
@@ -160,10 +160,8 @@ pub async fn get_router() -> Router {
         .route("/htmx.js", get(htmx_minified))
         .route("/nonogram", get(nonogram))
         .route("/cursor", post(cursor))
-        .route("/flag/:id", put(flag_checkbox))
-        .route("/flag/:id", delete(unflag_checkbox))
-        .route("/checkbox/:id", put(mark_checkbox))
-        .route("/checkbox/:id", delete(unmark_checkbox))
+        .route("/flag/:id", put(flag_checkbox).delete(unflag_checkbox))
+        .route("/checkbox/:id", put(mark_checkbox).delete(unmark_checkbox))
         .with_state(state)
 }
 
@@ -309,10 +307,13 @@ document.addEventListener("multipaintVersion", (e) => {
     }
 });
 
-let isTouchDevice = (navigator.maxTouchPoints > 0 || navigator.msMaxTouchPoints > 0);
-if (!isTouchDevice) {
+function isTouchDevice() {
+    return hasTouch;
+}
+let hasTouch = (navigator.maxTouchPoints > 0 || navigator.msMaxTouchPoints > 0);
+if (!hasTouch) {
     document.addEventListener("touchstart", (e) => {
-        isTouchDevice = true;
+        hasTouch = true;
     }, {
         once: true,
     });
@@ -351,7 +352,7 @@ function updateFrame(currentTimestamp) {
                 timerElapsed.classList.add("hidden");
             }
             if (timerDone) {
-                done.classList.remove("hidden");
+                timerDone.classList.remove("hidden");
             }
         } else {
             if (timerElapsed) {
@@ -390,14 +391,14 @@ async fn index() -> Markup {
         script { (PreEscaped(SCRIPT)) }
     }
     body {
-        #cursors hx-post="/cursor" hx-trigger="load, mousemove delay:500ms, every 1000ms" hx-vals="javascript:{id: id, mouseX: mouseX, mouseY: mouseY}" {}
+        #cursors hx-post="/cursor" hx-trigger="load, mousemove delay:500ms, every 1500ms" hx-vals="javascript:{id: id, mouseX: mouseX, mouseY: mouseY}" {}
         h1 { "Multipaint by Numbers" }
         hr {}
         main {
             #nonogram hx-get="/nonogram" hx-trigger="load, every 2s" {}
         }
         hr {}
-        p { "Click to mark, right click to flag. Mobile devices don't support flags for now." }
+        p { "Click or touch to mark, right-click or long-touch to flag." }
         p {
             "Puzzles from "
             a href="https://nonogrammed.com/" target="_blank" {
@@ -447,31 +448,16 @@ async fn nonogram(State(state): State<AppState>) -> (HeaderMap, Markup) {
         .saturating_sub(nonogram.timer.start.elapsed());
     let puzzle_state = nonogram.state;
     drop(nonogram);
-    match puzzle_state {
-        NonogramState::Solved(_) => {
-            headers.insert(
-                "HX-Trigger",
-                format!(
-                    "{{\"nonogramTimeLeft\": 0, \"multipaintVersion\": {}}}",
-                    *VERSION
-                )
-                .parse()
-                .unwrap(),
-            );
-        }
-        _ => {
-            headers.insert(
-                "HX-Trigger",
-                format!(
-                    "{{\"nonogramTimeLeft\": {}, \"multipaintVersion\": {}}}",
-                    time_left.as_millis(),
-                    *VERSION
-                )
-                .parse()
-                .unwrap(),
-            );
-        }
-    }
+    headers.insert(
+        "HX-Trigger",
+        format!(
+            "{{\"nonogramTimeLeft\": {}, \"multipaintVersion\": {}}}",
+            time_left.as_millis(),
+            *VERSION
+        )
+        .parse()
+        .unwrap(),
+    );
     let puzzle = state.puzzle.borrow();
     let rows = &puzzle.rows;
     let columns = &puzzle.columns;
@@ -490,8 +476,10 @@ async fn nonogram(State(state): State<AppState>) -> (HeaderMap, Markup) {
                 }
             }
             @if let Some(copyright) = &puzzle.copyright {
-                em .copyright {
-                    (PreEscaped(copyright))
+                p {
+                    em .copyright {
+                        (PreEscaped(copyright))
+                    }
                 }
             }
             (timer(
@@ -581,11 +569,11 @@ fn checkbox(id: usize, disabled: bool, state: &CheckboxState) -> Markup {
             }
         },
         CheckboxState::Flagged if !disabled => html! {
-            .checkbox.flagged {
+            .checkbox.flagged hx-delete=(format!("/flag/{id}")) hx-trigger="contextmenu[pointerType=='touch']" hx-swap="outerHTML" {
                 input id=(format!("checkbox-{id}")) type="checkbox" disabled[disabled] {}
                 .mark {}
                 div hx-put=(format!("/checkbox/{id}")) hx-trigger=(format!("mousedown[buttons==1] from:#checkbox-{id}, mouseenter[buttons==1] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
-                div hx-delete=(format!("/flag/{id}")) hx-trigger=(format!("mousedown[buttons==2] from:#checkbox-{id}, contextmenu[isTouchDevice] from:closest .checkbox-cell, mouseenter[buttons==2] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
+                div hx-delete=(format!("/flag/{id}")) hx-trigger=(format!("mousedown[buttons==2] from:#checkbox-{id}, mouseenter[buttons==2] from:#checkbox-{id}, contextmenu[isTouchDevice()] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
             }
         },
         _ => html! {
@@ -593,7 +581,7 @@ fn checkbox(id: usize, disabled: bool, state: &CheckboxState) -> Markup {
                 input id=(format!("checkbox-{id}")) type="checkbox" disabled[disabled] {}
                 .mark {}
                 div hx-put=(format!("/checkbox/{id}")) hx-trigger=(format!("mousedown[buttons==1] from:#checkbox-{id}, mouseenter[buttons==1] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
-                div hx-put=(format!("/flag/{id}")) hx-trigger=(format!("mousedown[buttons==2] from:#checkbox-{id}, contextmenu[isTouchDevice] from:closest .checkbox-cell, mouseenter[buttons==2] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
+                div hx-put=(format!("/flag/{id}")) hx-trigger=(format!("mousedown[buttons==2] from:#checkbox-{id}, mouseenter[buttons==2] from:#checkbox-{id}, contextmenu[isTouchDevice()] from:#checkbox-{id}")) hx-swap="outerHTML" hx-target="closest .checkbox" {}
             }
         },
     }
