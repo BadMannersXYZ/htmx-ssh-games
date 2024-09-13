@@ -383,7 +383,7 @@ async fn index() -> Markup {
         title { "Multipaint by Numbers" }
         meta property="og:title" content="Multipaint by Numbers" {}
         meta property="og:url" content="https://multipaint.sish.top" {}
-        meta property="og:description" content="Multiplayer nonogram." {}
+        meta property="og:description" content="Multiplayer picross/nonogram, powered by htmx." {}
         // script src="https://unpkg.com/htmx.org@2.0.2" integrity="sha384-Y7hw+L/jvKeWIRRkqWYfPcvVxHzVzn5REgzbawhxAuQGwX1XWe70vji+VSeHOThJ" crossorigin="anonymous" {}
         // script src="https://unpkg.com/htmx.org@2.0.2/dist/htmx.js" integrity="sha384-yZq+5izaUBKcRgFbxgkRYwpHhHHCpp5nseXp0MEQ1A4MTWVMnqkmcuFez8x5qfxr" crossorigin="anonymous" {}
         script src="/htmx.js" {}
@@ -398,7 +398,7 @@ async fn index() -> Markup {
             #nonogram hx-get="/nonogram" hx-trigger="load, every 2s" {}
         }
         hr {}
-        p { "Click or touch to mark, right-click or long-touch to flag." }
+        p { "Click or touch to mark, right-click or long-touch to flag. Dragging with a cursor also works." }
         p {
             "Puzzles from "
             a href="https://nonogrammed.com/" target="_blank" {

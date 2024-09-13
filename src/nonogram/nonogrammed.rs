@@ -102,7 +102,7 @@ pub async fn get_puzzle_data(id: u32) -> Result<NonogrammedPuzzle> {
             if let Some(caps) = USERNAME_RE.captures(line) {
                 let username = &caps["username"];
                 copyright = Some(format!(
-                    r#"&copy; Copyright <a href="https://nonogrammed.com/user.php?NAME={username}">{username}</a>"#
+                    r#"&copy; <a href="https://nonogrammed.com/user.php?NAME={username}">{username}</a>"#
                 ));
             }
         }
