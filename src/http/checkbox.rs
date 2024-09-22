@@ -64,14 +64,14 @@ async fn index() -> Markup {
         (head())
         body {
             h1 { (CHECKBOX_WIDTH*CHECKBOX_HEIGHT) " Checkboxes" }
-            ul hx-get="/checkboxes" hx-trigger="load" {}
+            div hx-get="/checkboxes" hx-trigger="load" hx-swap="outerHTML" {}
         }
     }
 }
 
 async fn all_checkboxes(State(state): State<AppState>) -> Markup {
     html! {
-        ul hx-get="/checkboxes" hx-trigger="every 3s" style=(format!("grid-template-columns: repeat({}, minmax(0, 1fr));", CHECKBOX_WIDTH)) {
+        ul hx-get="/checkboxes" hx-trigger="every 3s" style=(format!("grid-template-columns: repeat({}, minmax(0, 1fr));", CHECKBOX_WIDTH)) hx-swap="outerHTML" {
             @for (id, checkbox) in state.checkboxes.lock().unwrap()[..CHECKBOX_WIDTH*CHECKBOX_HEIGHT].iter().by_vals().enumerate() {
                 li {
                     @if checkbox {
